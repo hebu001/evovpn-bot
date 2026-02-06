@@ -61,3 +61,4 @@ Thumbs.db
 
 # Docker volumes (managed externally)
 postgres_data/
+.lesshst
