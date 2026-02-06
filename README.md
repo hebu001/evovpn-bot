@@ -41,6 +41,10 @@ nano .env
 | `NAME_VPN_CONFIG` | Название VPN (только буквы и цифры) |
 | `POSTGRES_PASSWORD` | Надёжный пароль для БД |
 
+```bash
+systemctl start docker
+systemctl enable docker
+```
 ### 4. Запустить бота
 
 ```bash
