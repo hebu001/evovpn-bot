@@ -1116,7 +1116,7 @@ async def connect_messages_db():
         result = await get_local_path_data('messages.db')
         DB_MESSAGES = await db_connect(result) # , check_same_thread=False
         cursor = await DB_MESSAGES.cursor()
-        await cursor.execute("CREATE TABLE IF NOT EXISTS messages (id integer PRIMARY KEY,date text,isBot bool NOT NULL DEFAULT(0),chat_id integer NOT NULL DEFAULT(-1),message_text text NOT NULL DEFAULT('---'));")
+        await cursor.execute("CREATE TABLE IF NOT EXISTS messages (id integer PRIMARY KEY,date text,isBot bool NOT NULL DEFAULT(0),chat_id bigint NOT NULL DEFAULT(-1),message_text text NOT NULL DEFAULT('---'));")
         await DB_MESSAGES.commit()
     except:
         await Print_Error()
