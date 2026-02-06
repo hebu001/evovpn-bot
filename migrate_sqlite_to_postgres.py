@@ -220,6 +220,28 @@ async def ensure_bigint_columns(conn, table, force_cols):
                 )
 
 
+def _default_for_null(col, pg_type):
+    """Return a safe default when SQLite has NULL but PG column is NOT NULL."""
+    if not col["notnull"]:
+        return None  # column allows NULL, keep it
+    dflt = col.get("dflt_value")
+    if dflt is not None:
+        text = str(dflt).strip().strip("'\"()")
+        if pg_type in ("INTEGER", "BIGINT"):
+            try: return int(text)
+            except: return 0
+        if pg_type == "DOUBLE PRECISION":
+            try: return float(text)
+            except: return 0.0
+        return text
+    # No default defined — use type-safe zero value
+    if pg_type in ("INTEGER", "BIGINT"):
+        return 0
+    if pg_type == "DOUBLE PRECISION":
+        return 0.0
+    return ""
+
+
 async def insert_rows(conn, table, columns, rows, truncate=False, type_overrides=None):
     type_overrides = type_overrides or {}
     if not rows:
@@ -239,8 +261,11 @@ async def insert_rows(conn, table, columns, rows, truncate=False, type_overrides
     payload = []
     for row in rows:
         converted = []
-        for value, pg_type in zip(row, pg_types):
-            converted.append(convert_row_value(value, pg_type))
+        for value, pg_type, col in zip(row, pg_types, columns):
+            v = convert_row_value(value, pg_type)
+            if v is None and col["notnull"]:
+                v = _default_for_null(col, pg_type)
+            converted.append(v)
         payload.append(tuple(converted))
 
     await conn.executemany(insert_sql, payload)
@@ -317,7 +342,12 @@ async def migrate_sqlite_db(conn, sqlite_path, truncate=False):
         identity_cols = await ensure_table(conn, pg_table, columns, type_overrides=type_overrides)
         await ensure_columns(conn, pg_table, columns, type_overrides=type_overrides)
         await ensure_bigint_columns(conn, pg_table, force_bigint_cols)
-        await insert_rows(conn, pg_table, columns, rows, truncate=truncate, type_overrides=type_overrides)
+        try:
+            await insert_rows(conn, pg_table, columns, rows, truncate=truncate, type_overrides=type_overrides)
+        except Exception as e:
+            print(f"  WARNING: {pg_table}: insert failed: {e}")
+            print(f"  Skipping data for {pg_table}, continuing...")
+            continue
 
         for identity_col in identity_cols:
             max_val = await conn.fetchval(
