@@ -381,8 +381,11 @@ async def main():
     dsn = build_dsn(args.database_url)
     conn = await asyncpg.connect(dsn)
     try:
+        # Disable FK checks during migration
+        await conn.execute("SET session_replication_role = 'replica'")
         await migrate_sqlite_db(conn, args.sqlite_main, truncate=args.truncate)
         await migrate_sqlite_db(conn, args.sqlite_messages, truncate=args.truncate)
+        await conn.execute("SET session_replication_role = 'origin'")
         print("Cleaning up spurious columns...")
         await cleanup_spurious_columns(conn)
     finally:
