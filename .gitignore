@@ -1,0 +1,63 @@
+# Secrets
+.env
+
+# SQLite databases
+data/*.db
+
+# SQL dumps
+data/*.sql
+
+# Generated Python config (migrated to .env)
+data/config.py
+data/__pycache__/
+
+# Logs
+logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Backup copies
+Copy of *.py
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Cursor
+.cursor/
+.cursor-server/
+.cursorignore
+
+# Local tools
+.local/
+
+# Claude
+.claude/
+.claude.json
+.claude.json.backup.*
+claude-skills/
+
+# OS / shell
+.DS_Store
+Thumbs.db
+.bash_history
+.bashrc
+.profile
+.selected_editor
+.viminfo
+.gitconfig
+.ssh/
+.cache/
+.config/
+
+# Docker local state
+.docker/
+
+# Docker volumes (managed externally)
+postgres_data/
