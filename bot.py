@@ -1753,7 +1753,11 @@ class DB:
     async def get_all_users_report(self, text='', is_search=False):
         cursor = await self.conn.cursor()
         if is_search:
-            result = await cursor.execute("SELECT User_id, Nick, First_Name, Last_Name, id_Otkuda, Summ, isBan, Lang, tarifs FROM Users WHERE User_id = ? OR Nick = ? OR First_Name = ?", (text,text,text,))
+            try:
+                user_id_int = int(text)
+            except (ValueError, TypeError):
+                user_id_int = 0
+            result = await cursor.execute("SELECT User_id, Nick, First_Name, Last_Name, id_Otkuda, Summ, isBan, Lang, tarifs FROM Users WHERE User_id = ? OR Nick = ? OR First_Name = ?", (user_id_int, text, text,))
         else:
             result = await cursor.execute("SELECT User_id, Nick, First_Name, Last_Name, id_Otkuda, Summ, isBan, Lang, tarifs FROM Users")
         return await result.fetchall()
@@ -3466,7 +3470,7 @@ class YPay:
                 elif self.isYooKassa:
                     Configuration.account_id = self.ShopID_CLIENT_ID
                     Configuration.secret_key = self.API_Key_TOKEN
-                    Configuration.timeout = 5
+                    Configuration.timeout = 15
                 elif self.isTinfkoffPay:
                     if PHONE_NUMBER != '':
                         self.tinkoff = TinkoffAcquiring(self.API_Key_TOKEN, self.ShopID_CLIENT_ID)
@@ -3641,10 +3645,10 @@ class YPay:
                 if AUTO_PAY_YKASSA:
                     payment_data["save_payment_method"] = True
                 try:
-                    payment = Payment.create(payment_data)
+                    payment = await asyncio.to_thread(Payment.create, payment_data)
                 except:
                     await sleep(random.randint(10,30)/10)
-                    payment = Payment.create(payment_data)
+                    payment = await asyncio.to_thread(Payment.create, payment_data)
                 logger.debug(f'Создал ссылку для оплаты bill_id = {payment.id}')
                 logger.debug(f'Ссылка для оплаты = {payment.confirmation.confirmation_url}')
                 user.bill_id = payment.id
@@ -3914,10 +3918,10 @@ class YPay:
             try:
                 logger.debug(f'Проверяю bill_id Ю.Касса === {bill_id}')
                 try:
-                    result = Payment.find_one(bill_id)
+                    result = await asyncio.to_thread(Payment.find_one, bill_id)
                 except:
                     await sleep(random.randint(10,30)/10)
-                    result = Payment.find_one(bill_id)
+                    result = await asyncio.to_thread(Payment.find_one, bill_id)
                 logger.debug(f'Payment.find_one(bill_id="{bill_id}"): {result}')
                 if bool(result.paid):
                     logger.debug(f'Оплата прошла = {result.json()}')
@@ -4182,7 +4186,7 @@ class YPay:
                         ]
                     }
                 }
-                payment = Payment.create(data)
+                payment = await asyncio.to_thread(Payment.create, data)
                 user.bill_id = payment.id
                 logger.debug(f'✅{user_id}: user.bill_id = {user.bill_id}, payment = {payment}')
                 logger.debug(f'✅{user_id}: Создал ссылку rec_payment = {payment.json()}')
@@ -4255,10 +4259,10 @@ class YPay:
                     params['cursor'] = cursor
                 try:
                     try:
-                        res = Payment.list(params)
+                        res = await asyncio.to_thread(Payment.list, params)
                     except:
                         await sleep(random.randint(10,30)/10)
-                        res = Payment.list(params)
+                        res = await asyncio.to_thread(Payment.list, params)
                     for item in res.items:
                         if str(item.status) == 'succeeded':
                             summ = str(item.income_amount.value) # Сумма пришла
@@ -13724,7 +13728,7 @@ async def delete_user_call(call):
     try:
         message = call.message
         user_id = message.chat.id
-        user_delete = call.data.split(':')[1]
+        user_delete = int(call.data.split(':')[1])
 
         if 'yes' in call.data:
             res_ = await DB.exists_user(user_delete)
@@ -13846,7 +13850,7 @@ async def unban_user_call(call):
     try:
         message = call.message
         user_id = message.chat.id
-        user_unban = call.data.split(':')[1]
+        user_unban = int(call.data.split(':')[1])
 
         if 'yes' in call.data:
             res_ = await DB.exists_user(user_unban)
