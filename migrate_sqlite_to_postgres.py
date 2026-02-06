@@ -231,10 +231,10 @@ async def insert_rows(conn, table, columns, rows, truncate=False, type_overrides
     ]
     cols_sql = ", ".join(f'"{col}"' for col in cols)
     placeholders = ", ".join(f"${idx}" for idx in range(1, len(cols) + 1))
-    insert_sql = f'INSERT INTO "{table}" ({cols_sql}) VALUES ({placeholders})'
+    insert_sql = f'INSERT INTO "{table}" ({cols_sql}) VALUES ({placeholders}) ON CONFLICT DO NOTHING'
 
     if truncate:
-        await conn.execute(f'TRUNCATE TABLE "{table}"')
+        await conn.execute(f'TRUNCATE TABLE "{table}" CASCADE')
 
     payload = []
     for row in rows:
@@ -244,6 +244,7 @@ async def insert_rows(conn, table, columns, rows, truncate=False, type_overrides
         payload.append(tuple(converted))
 
     await conn.executemany(insert_sql, payload)
+    print(f"  {table}: {len(payload)} rows processed")
 
 
 async def migrate_sqlite_db(conn, sqlite_path, truncate=False):
