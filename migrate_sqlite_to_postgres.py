@@ -204,6 +204,38 @@ async def ensure_columns(conn, table, columns, type_overrides=None):
         sql += notnull
         await conn.execute(sql)
 
+async def ensure_type_overrides(conn, table, columns, type_overrides):
+    """ALTER columns whose PG type doesn't match the required override (e.g. integer→text)."""
+    if not type_overrides:
+        return
+    rows = await conn.fetch(
+        "SELECT column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = $1",
+        table,
+    )
+    pg_type_map = {"TEXT": "text", "BIGINT": "bigint", "INTEGER": "integer",
+                   "DOUBLE PRECISION": "double precision", "BYTEA": "bytea"}
+    for row in rows:
+        name = row[0]
+        current_type = row[1]
+        if name in type_overrides:
+            target = type_overrides[name]
+            expected_pg = pg_type_map.get(target, target.lower())
+            if current_type != expected_pg:
+                try:
+                    using = ""
+                    if expected_pg == "text":
+                        using = f' USING "{name}"::text'
+                    elif expected_pg in ("bigint", "integer"):
+                        using = f' USING "{name}"::bigint'
+                    await conn.execute(
+                        f'ALTER TABLE "{table}" ALTER COLUMN "{name}" TYPE {target}{using}'
+                    )
+                    print(f"  {table}.{name}: {current_type} -> {target}")
+                except Exception as e:
+                    print(f"  WARNING: {table}.{name}: cannot change type: {e}")
+
+
 async def ensure_bigint_columns(conn, table, force_cols):
     rows = await conn.fetch(
         "SELECT column_name, data_type FROM information_schema.columns "
@@ -345,6 +377,7 @@ async def migrate_sqlite_db(conn, sqlite_path, truncate=False):
 
         identity_cols = await ensure_table(conn, pg_table, columns, type_overrides=type_overrides)
         await ensure_columns(conn, pg_table, columns, type_overrides=type_overrides)
+        await ensure_type_overrides(conn, pg_table, columns, type_overrides)
         await ensure_bigint_columns(conn, pg_table, force_bigint_cols)
         try:
             await insert_rows(conn, pg_table, columns, rows, truncate=truncate, type_overrides=type_overrides)
