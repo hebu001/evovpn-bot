@@ -213,8 +213,9 @@ async def ensure_bigint_columns(conn, table, force_cols):
     for row in rows:
         name = row[0]
         data_type = row[1]
-        if name in force_cols or name.endswith("_id"):
-            if data_type in ("integer", "smallint"):
+        # Only upgrade integer columns to BIGINT, never touch text columns
+        if data_type in ("integer", "smallint"):
+            if name in force_cols or name.endswith("_id"):
                 await conn.execute(
                     f'ALTER TABLE "{table}" ALTER COLUMN "{name}" TYPE BIGINT'
                 )
@@ -315,12 +316,15 @@ async def migrate_sqlite_db(conn, sqlite_path, truncate=False):
         type_overrides = {}
         for col in columns:
             name = col["name"].lower()
-            if name in force_bigint_cols or name.endswith("_id"):
-                type_overrides[name] = "BIGINT"
+            sqlite_type = map_sqlite_type(col["type"], is_pk=col["pk"] > 0)
+            # Only force BIGINT if the SQLite type is integer-like
+            if sqlite_type in ("INTEGER", "BIGINT"):
+                if name in force_bigint_cols or name.endswith("_id"):
+                    type_overrides[name] = "BIGINT"
         if rows:
             for index, col in enumerate(columns):
                 name = col["name"].lower()
-                pg_type = map_sqlite_type(col["type"], is_pk=col["pk"] > 0)
+                pg_type = type_overrides.get(name, map_sqlite_type(col["type"], is_pk=col["pk"] > 0))
                 if pg_type in ("INTEGER", "BIGINT", "DOUBLE PRECISION"):
                     for row in rows:
                         value = row[index]
