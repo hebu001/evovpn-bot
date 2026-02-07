@@ -41,13 +41,17 @@ nano .env
 | `NAME_VPN_CONFIG` | Название VPN (только буквы и цифры) |
 | `POSTGRES_PASSWORD` | Надёжный пароль для БД |
 
+
+Если Ubuntu 24 перезапустить Docker
 ```bash
+cd
 systemctl start docker
 systemctl enable docker
 ```
 ### 4. Запустить бота
 
 ```bash
+cd evovpn-bot
 docker compose up -d --build
 ```
 
