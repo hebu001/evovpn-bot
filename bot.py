@@ -7020,21 +7020,40 @@ async def update_bot():
     await DB.GET_SERVERS()
     await DB.GET_WALLETS()
 
-    # no_last_update = True
-    if no_last_update:
+    if not PR_WIREGUARD and not PR_VLESS and not PR_OUTLINE and not PR_PPTP:
+        await send_admins(None, '🛑Все протоколы отключены!!!')
+
+    logger.debug('✅Обновление бота прошло успешно!')
+
+    #region Загрузка актуальных переменных
+    TARIF_1 = await DB.GET_VARIABLE('TARIF_1')
+    TARIF_3 = await DB.GET_VARIABLE('TARIF_3')
+    TARIF_6 = await DB.GET_VARIABLE('TARIF_6')
+    TARIF_12 = await DB.GET_VARIABLE('TARIF_12')
+    PARTNER_P = await DB.GET_VARIABLE('PARTNER_P')
+    SUMM_VIVOD = await DB.GET_VARIABLE('SUMM_VIVOD')
+    SUMM_CHANGE_PROTOCOL = await DB.GET_VARIABLE('SUMM_CHANGE_PROTOCOL')
+    SUMM_CHANGE_LOCATIONS = await DB.GET_VARIABLE('SUMM_CHANGE_LOCATIONS')
+    KURS_RUB = await DB.GET_VARIABLE('KURS_RUB')
+    KURS_RUB_AUTO = await DB.GET_VARIABLE('KURS_RUB_AUTO')
+    #endregion
+
+asyncio.run(update_bot())
+
+async def update_servers_background():
+    """Check and update VPN servers in the background (does not block bot startup)."""
+    try:
+        logger.debug('🔄Запущено фоновое обновление серверов...')
         async def updateServer(ip='', password=''):
             install_http_server = False
-            # Проверка установлен ли http-сервер
             result = await exec_command_in_http_server(ip=ip, password=password, command='ls /root/', read_timeout=5)
             logger.debug(f'Проверка установлен ли http-сервер на сервере {ip}, результат: {result}')
             if not result or (result and not 'server.py' in result):
-                # Установка http-сервера
                 logger.debug(f'На сервере {ip} не установлен http-сервер, result = {result}, устанавливаем...')
                 commands = [
                     "sudo apt-get install -y fail2ban",
                     "systemctl enable fail2ban",
                     "systemctl start fail2ban",
-
                     'sudo apt-get install -y supervisor curl',
                     'curl https://raw.githubusercontent.com/CodenGames/VPCoden_bot/main/server.py > /root/server.py',
                     'sed -i "s/__login__/{ip}/g" /root/server.py',
@@ -7049,7 +7068,6 @@ async def update_bot():
                 if not result:
                     await send_admins(None, f'🛑На сервере {ip} не удалось настроить Fail2Ban или http-сервер')
             else:
-                # На сервере установлен http-сервер
                 logger.debug(f'На сервере {ip} установлен http-сервер')
 
             if not install_http_server:
@@ -7067,17 +7085,14 @@ async def update_bot():
 
             if install_http_server:
                 await sleep(5)
-                # Проверка установлен ли vless на сервере
                 install_x_ui = False
                 result = await exec_command_in_http_server(ip=ip, password=password, command='ls /usr/local/x-ui', read_timeout=5)
                 if result:
                     if 'No such file or directory' in result or 'not found' in result:
-                        # Установка vless на сервере
                         install_x_ui = True
-                        logger.debug(f'🛑🛑🛑🛑🛑На сервере {ip} не установлен x-ui, result = {result}, устанавливаем...')
+                        logger.debug(f'На сервере {ip} не установлен x-ui, устанавливаем...')
                         return
                     else:
-                        # На сервере установлен vless
                         logger.debug(f'На сервере {ip} установлен x-ui')
                 else:
                     await send_admins(None, f'🛑HTTP-сервер <b>{ip}</b> не ответил при обновлении')
@@ -7105,26 +7120,12 @@ async def update_bot():
             for server in SERVERS:
                 tasks.append(asyncio.create_task(updateServer(server['ip'], server['password'])))
             await asyncio.gather(*tasks)
-
-    if not PR_WIREGUARD and not PR_VLESS and not PR_OUTLINE and not PR_PPTP:
-        await send_admins(None, '🛑Все протоколы отключены!!!')
-
-    logger.debug('✅Обновление бота прошло успешно!')
-
-    #region Загрузка актуальных переменных
-    TARIF_1 = await DB.GET_VARIABLE('TARIF_1')
-    TARIF_3 = await DB.GET_VARIABLE('TARIF_3')
-    TARIF_6 = await DB.GET_VARIABLE('TARIF_6')
-    TARIF_12 = await DB.GET_VARIABLE('TARIF_12')
-    PARTNER_P = await DB.GET_VARIABLE('PARTNER_P')
-    SUMM_VIVOD = await DB.GET_VARIABLE('SUMM_VIVOD')
-    SUMM_CHANGE_PROTOCOL = await DB.GET_VARIABLE('SUMM_CHANGE_PROTOCOL')
-    SUMM_CHANGE_LOCATIONS = await DB.GET_VARIABLE('SUMM_CHANGE_LOCATIONS')
-    KURS_RUB = await DB.GET_VARIABLE('KURS_RUB')
-    KURS_RUB_AUTO = await DB.GET_VARIABLE('KURS_RUB_AUTO')
-    #endregion
-
-asyncio.run(update_bot())
+            for server in SERVERS:
+                ip = server['ip']
+                logger.debug(f'✅Служба http_server успешно обновлена на сервере {server}')
+        logger.debug('✅Фоновое обновление серверов завершено!')
+    except Exception as e:
+        logger.warning(f'🛑Ошибка в update_servers_background: {e}')
 
 async def update_http_server(ip, password, url=''):
     try:
@@ -17898,6 +17899,7 @@ async def start_bot():
         tasks.append(asyncio.create_task(check_servers_on()))
         tasks.append(asyncio.create_task(get_kurs_usdtrub_garantex()))
         tasks.append(asyncio.create_task(twohour_notify_loop()))
+        tasks.append(asyncio.create_task(update_servers_background()))
         await asyncio.gather(*tasks)
     except Exception as e:
         logger.warning(f'🛑Ошибка в start_bot: {e}')
