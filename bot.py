@@ -5299,8 +5299,12 @@ class MARZBAN:
                     ],
                     "vless": [
                         "VLESS TCP REALITY",
+                        "VLESS TCP REALITY2",
+                        "mega",
                         "VLESS GRPC REALITY",
                         "VLESSBLOCK2",
+                        "LTE",
+                        "LTE2"
                     ],
                     "trojan": [
                         "Trojan Websocket TLS"
