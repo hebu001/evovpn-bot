@@ -673,6 +673,21 @@ async def dney(day=0, user=None):
     except:
         await Print_Error()
 
+def _parse_datetime(date_str):
+    """Parse datetime from both SQLite ('2026-02-09 12:42:30.581261') and Postgres ISO ('2026-02-09T12:42:30.581261') formats."""
+    if date_str is None:
+        return None
+    s = str(date_str).replace('T', ' ')
+    try:
+        if '.' in s:
+            return _parse_datetime(s)
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+    except:
+        try:
+            return datetime.strptime(s[:10], "%Y-%m-%d")
+        except:
+            return None
+
 def while_sql(func):
     async def wrapper(*args, **kwargs):
         i = 0
@@ -1746,6 +1761,10 @@ class DB:
     async def add_ref(self, id_refer=None, id_client=None):
         res = await self.exists_ref(id_client, id_refer)
         if res:
+            return
+        # Verify both users exist before inserting (prevents FK violation)
+        if not await self.exists_user(id_refer) or not await self.exists_user(id_client):
+            logger.warning(f'⚠️add_ref: пользователь {id_refer} или {id_client} не найден в Users')
             return
 
         cursor = await self.conn.cursor()
@@ -8303,7 +8322,7 @@ async def ckeck_clients_no_keys():
                     date = data[5]
                     if not date is None:
                         if '.' in date:
-                            date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S.%f")
+                            date_time = _parse_datetime(date)
                         else:
                             date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
                         now = datetime.now()
@@ -8355,7 +8374,7 @@ async def check_spec_urls():
                 date = date.strftime("%Y-%m-%d %H:%M:%S.%f")
 
             if '.' in str(date):
-                date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S.%f")
+                date_time = _parse_datetime(date)
             else:
                 date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
 
@@ -10549,7 +10568,7 @@ async def urls_message(message):
                             date = date.strftime("%Y-%m-%d %H:%M:%S.%f")
 
                         if '.' in str(date):
-                            date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S.%f")
+                            date_time = _parse_datetime(date)
                         else:
                             date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
 
@@ -10564,7 +10583,7 @@ async def urls_message(message):
                         last_dolg = await DB.get_parter_pay(id_partner)
 
                         if not last_dolg is None and len(last_dolg) > 0:
-                            last_dolg_date = datetime.strptime(last_dolg[-1][1], "%Y-%m-%d %H:%M:%S.%f")
+                            last_dolg_date = _parse_datetime(last_dolg[-1][1])
                             last_dolg = last_dolg[-1][4]
                         else:
                             last_dolg = 0
@@ -10579,7 +10598,7 @@ async def urls_message(message):
                             date_ = res[1]
                             total_prodl_summ += total_summ
 
-                            if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                            if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                 continue
 
                             new_prodl_summ += total_summ
@@ -10593,7 +10612,7 @@ async def urls_message(message):
                             date_ = res[1]
                             total_buy_summ += total_summ
 
-                            if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                            if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                 continue
 
                             new_buy_summ += total_summ
@@ -10608,7 +10627,7 @@ async def urls_message(message):
                                 date_ = res[1]
                                 total_promo_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
 
                                 new_promo_summ += total_summ  
@@ -10823,8 +10842,9 @@ async def create_new_spec_url(user_id, id_partner, promo_code, percent_discount,
             return
 
         if len(user_dict) > 0:
-            for id_cl in user_dict.keys():
-                await user_dict[id_cl].set_tarifs()
+            for id_cl in list(user_dict.keys()):
+                try: await user_dict[id_cl].set_tarifs()
+                except KeyError: pass
 
         if not result:
             if str(id_partner) != promo_code:
@@ -14112,7 +14132,7 @@ async def keys_get_call(call=None, message=None, call_data=None):
                         if not user_isPayChangeProtocol:
                             if not DateChangeProtocol is None:
                                 if '.' in DateChangeProtocol:
-                                    date_time = datetime.strptime(DateChangeProtocol, "%Y-%m-%d %H:%M:%S.%f")
+                                    date_time = _parse_datetime(DateChangeProtocol)
                                 else:
                                     date_time = datetime.strptime(DateChangeProtocol, "%Y-%m-%d %H:%M:%S")
                                 now = datetime.now()
@@ -14191,7 +14211,7 @@ async def keys_get_call(call=None, message=None, call_data=None):
                 if not datePayChangeLocations is None:
                     # провериь, прошло ли 30 дней с момента оплаты
                     if '.' in datePayChangeLocations:
-                        date_time = datetime.strptime(datePayChangeLocations, "%Y-%m-%d %H:%M:%S.%f")
+                        date_time = _parse_datetime(datePayChangeLocations)
                     else:
                         date_time = datetime.strptime(datePayChangeLocations, "%Y-%m-%d %H:%M:%S")
                     now = datetime.now()
@@ -14206,7 +14226,7 @@ async def keys_get_call(call=None, message=None, call_data=None):
                         if operation[1] == 'change_location':
                             date_time = operation[7]
                             if '.' in date_time:
-                                date_time = datetime.strptime(date_time, "%Y-%m-%d %H:%M:%S.%f")
+                                date_time = _parse_datetime(date_time)
                             else:
                                 date_time = datetime.strptime(date_time, "%Y-%m-%d %H:%M:%S")
                             now = datetime.now()
@@ -14307,7 +14327,7 @@ async def keys_get_call(call=None, message=None, call_data=None):
                                     date_str = operation[7]
                                     try:
                                         if '.' in date_str:
-                                            op_date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S.%f")
+                                            op_date = _parse_datetime(date_str)
                                         else:
                                             op_date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
                                     except:
@@ -14815,7 +14835,7 @@ async def urls_call(call=None, cpec_code='', message=None):
                             partner_pay = await DB.get_parter_pay(id_partner)
 
                             if partner_pay:
-                                last_dolg_date = datetime.strptime(partner_pay[-1][1], "%Y-%m-%d %H:%M:%S.%f")
+                                last_dolg_date = _parse_datetime(partner_pay[-1][1])
                                 last_dolg = partner_pay[-1][4]
                             else:
                                 last_dolg = 0
@@ -14830,7 +14850,7 @@ async def urls_call(call=None, cpec_code='', message=None):
                                 date_ = res[1]
                                 total_prodl_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
 
                                 new_prodl_summ += total_summ
@@ -14844,7 +14864,7 @@ async def urls_call(call=None, cpec_code='', message=None):
                                 date_ = res[1]
                                 total_buy_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
 
                                 new_buy_summ += total_summ
@@ -14859,7 +14879,7 @@ async def urls_call(call=None, cpec_code='', message=None):
                                     date_ = res[1]
                                     total_promo_summ += total_summ
 
-                                    if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                    if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                         continue
 
                                     new_promo_summ += total_summ  
@@ -16159,7 +16179,7 @@ async def message_input(message, alt_text=''):
                             last_dolg = await DB.get_parter_pay(id_partner)
 
                             if not last_dolg is None and len(last_dolg) > 0:
-                                last_dolg_date = datetime.strptime(last_dolg[-1][1], "%Y-%m-%d %H:%M:%S.%f")
+                                last_dolg_date = _parse_datetime(last_dolg[-1][1])
                                 last_dolg = last_dolg[-1][4]
                             else:
                                 last_dolg = 0
@@ -16174,7 +16194,7 @@ async def message_input(message, alt_text=''):
                                 date_ = res[1]
                                 total_prodl_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
                                 
                                 new_prodl_summ += total_summ
@@ -16188,7 +16208,7 @@ async def message_input(message, alt_text=''):
                                 date_ = res[1]
                                 total_buy_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
                                 
                                 new_buy_summ += total_summ
@@ -16203,7 +16223,7 @@ async def message_input(message, alt_text=''):
                                     date_ = res[1]
                                     total_promo_summ += total_summ
 
-                                    if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                    if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                         continue
                                     
                                     new_promo_summ += total_summ  
@@ -16928,7 +16948,7 @@ async def message_input(message, alt_text=''):
                     date = data[4]
                     if not date is None:
                         if '.' in date:
-                            date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S.%f")
+                            date_time = _parse_datetime(date)
                         else:
                             date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
                         now = datetime.now()
@@ -17300,7 +17320,7 @@ async def message_input(message, alt_text=''):
                             last_dolg = await DB.get_parter_pay(id_partner)
 
                             if not last_dolg is None and len(last_dolg) > 0:
-                                last_dolg_date = datetime.strptime(last_dolg[-1][1], "%Y-%m-%d %H:%M:%S.%f")
+                                last_dolg_date = _parse_datetime(last_dolg[-1][1])
                                 last_dolg = last_dolg[-1][4]
                             else:
                                 last_dolg = 0
@@ -17315,7 +17335,7 @@ async def message_input(message, alt_text=''):
                                 date_ = res[1]
                                 total_prodl_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
 
                                 new_prodl_summ += total_summ
@@ -17329,7 +17349,7 @@ async def message_input(message, alt_text=''):
                                 date_ = res[1]
                                 total_buy_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
 
                                 new_buy_summ += total_summ
@@ -17344,7 +17364,7 @@ async def message_input(message, alt_text=''):
                                     date_ = res[1]
                                     total_promo_summ += total_summ
 
-                                    if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                    if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                         continue
 
                                     new_promo_summ += total_summ  
@@ -17470,7 +17490,7 @@ async def message_input(message, alt_text=''):
                             last_dolg = await DB.get_parter_pay(id_partner)
 
                             if not last_dolg is None and len(last_dolg) > 0:
-                                last_dolg_date = datetime.strptime(last_dolg[-1][1], "%Y-%m-%d %H:%M:%S.%f")
+                                last_dolg_date = _parse_datetime(last_dolg[-1][1])
                                 last_dolg = last_dolg[-1][4]
                             else:
                                 last_dolg = 0
@@ -17485,7 +17505,7 @@ async def message_input(message, alt_text=''):
                                 date_ = res[1]
                                 total_prodl_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
 
                                 new_prodl_summ += total_summ
@@ -17499,7 +17519,7 @@ async def message_input(message, alt_text=''):
                                 date_ = res[1]
                                 total_buy_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
 
                                 new_buy_summ += total_summ
@@ -17514,7 +17534,7 @@ async def message_input(message, alt_text=''):
                                     date_ = res[1]
                                     total_promo_summ += total_summ
 
-                                    if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                    if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                         continue
 
                                     new_promo_summ += total_summ  
@@ -17611,7 +17631,7 @@ async def message_input(message, alt_text=''):
                             last_dolg = await DB.get_parter_pay(id_partner)
 
                             if not last_dolg is None and len(last_dolg) > 0:
-                                last_dolg_date = datetime.strptime(last_dolg[-1][1], "%Y-%m-%d %H:%M:%S.%f")
+                                last_dolg_date = _parse_datetime(last_dolg[-1][1])
                                 last_dolg = last_dolg[-1][4]
                             else:
                                 last_dolg = 0
@@ -17626,7 +17646,7 @@ async def message_input(message, alt_text=''):
                                 date_ = res[1]
                                 total_prodl_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
                                 
                                 new_prodl_summ += total_summ
@@ -17640,7 +17660,7 @@ async def message_input(message, alt_text=''):
                                 date_ = res[1]
                                 total_buy_summ += total_summ
 
-                                if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                     continue
                                 
                                 new_buy_summ += total_summ
@@ -17655,7 +17675,7 @@ async def message_input(message, alt_text=''):
                                     date_ = res[1]
                                     total_promo_summ += total_summ
 
-                                    if not last_dolg_date is None and datetime.strptime(date_, "%Y-%m-%d %H:%M:%S.%f") < last_dolg_date:
+                                    if not last_dolg_date is None and _parse_datetime(date_) < last_dolg_date:
                                         continue
                                     
                                     new_promo_summ += total_summ  
