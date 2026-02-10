@@ -8452,22 +8452,28 @@ async def send_otchet():
         await Print_Error()
 
 async def check_clients_and_keys():
-    try:
-        now = datetime.now()
-        start_time = datetime(1, 1, 1, hour=HOUR_CHECK - 1, minute=50)
-        end_time = datetime(1, 1, 1, hour=HOUR_CHECK, minute=10)
+    while True:
+        try:
+            now = datetime.now()
+            next_check = datetime(now.year, now.month, now.day, HOUR_CHECK, 0, 0)
+            if next_check <= now:
+                next_check += timedelta(days=1)
+            sleep_seconds = (next_check - now).total_seconds()
+            logger.debug(f'⏰ check_clients_and_keys: следующая проверка в {next_check.strftime("%Y-%m-%d %H:%M")}, спим {int(sleep_seconds)}с')
+            await sleep(sleep_seconds)
 
-        if start_time.time() <= now.time() <= end_time.time():
+            logger.debug('🔄Запущена ежедневная проверка ключей и клиентов')
             tasks = []
             tasks.append(asyncio.create_task(check_keys_all()))
             tasks.append(asyncio.create_task(ckeck_clients_no_keys()))
             tasks.append(asyncio.create_task(check_spec_urls()))
             if IS_OTCHET:
                 tasks.append(asyncio.create_task(send_otchet()))
-            logger.debug('✅Проверка ключей успешно завершена!')
             await asyncio.gather(*tasks)
-    except:
-        await Print_Error()
+            logger.debug('✅Ежедневная проверка ключей завершена!')
+        except:
+            await Print_Error()
+        await sleep(60)
 
 async def check_zaprosi():
     while True:
