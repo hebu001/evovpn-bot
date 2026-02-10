@@ -16946,12 +16946,12 @@ async def message_input(message, alt_text=''):
                 if not data is None and len(data) > 0:
                     date = data[4]
                     if not date is None:
-                        if '.' in date:
-                            date_time = _parse_datetime(date)
+                        date_time = _parse_datetime(date)
+                        if date_time is None:
+                            usl = True
                         else:
-                            date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
-                        now = datetime.now()
-                        usl = (now - date_time) >= timedelta(days=30)
+                            now = datetime.now()
+                            usl = (now - date_time) >= timedelta(days=30)
                     else:
                         usl = True
 
