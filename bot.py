@@ -14326,11 +14326,10 @@ async def keys_get_call(call=None, message=None, call_data=None):
                                 if ip_text in premium_ips:
                                     date_str = operation[7]
                                     try:
-                                        if '.' in date_str:
-                                            op_date = _parse_datetime(date_str)
-                                        else:
-                                            op_date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                                        op_date = _parse_datetime(date_str)
                                     except:
+                                        continue
+                                    if op_date is None:
                                         continue
                                     if not last_premium_change or op_date > last_premium_change:
                                         last_premium_change = op_date
