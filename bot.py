@@ -10573,12 +10573,8 @@ async def urls_message(message):
                             await DB.update_spec_url(id, date)
                             date = date.strftime("%Y-%m-%d %H:%M:%S.%f")
 
-                        if '.' in str(date):
-                            date_time = _parse_datetime(date)
-                        else:
-                            date_time = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
-
-                        date_str = date_time.strftime("%d.%m.%y %H:%M:%S")
+                        date_time = _parse_datetime(date)
+                        date_str = date_time.strftime("%d.%m.%y %H:%M:%S") if date_time else str(date or '')
 
                         klava_yes = True
 
