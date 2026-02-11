@@ -9601,20 +9601,17 @@ async def create_temp_table(name_table='Таблица.xlsx', data=[], columns=[
 
         logger.debug(f'Создание таблицы {name_table} с данными {data} и сортировкой {sort_values}')
         name_table = await get_local_path_data(name_table)
-        writer = pd.ExcelWriter(name_table)
+        writer = pd.ExcelWriter(name_table, engine='openpyxl')
         
         logger.debug(f'Создание таблицы {name_table} с данными {data} и сортировкой {sort_values} и запись в файл')
         df.to_excel(writer, sheet_name=sheet_name, index=False, na_rep='')
 
-        k = 0
-        for column in df:
-            column_width = max(df[column].astype(str).map(len).max(), len(column))
-            col_idx = df.columns.get_loc(column)
-            writer.sheets[sheet_name].set_column(col_idx, col_idx, column_width)
-            k += 1
-            #pip3 install xlsxwriter
+        ws = writer.sheets[sheet_name]
+        for col_idx, column in enumerate(df.columns, 1):
+            column_width = max(df[column].astype(str).map(len).max(), len(column)) + 2
+            ws.column_dimensions[chr(64 + col_idx) if col_idx <= 26 else 'A'].width = column_width
 
-        writer.save()
+        writer.close()
         return True
     except:
         await Print_Error()
