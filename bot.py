@@ -2101,6 +2101,12 @@ class DB:
     async def add_qr_key(self, user_id=None, vpn_key=None, date=None, os=None, isAdminKey=0, ip=None, days=None, summ=0, bill_id='', protocol=PR_DEFAULT, isChangeProtocol=False, keys_data='', podpiska=-1):
         cursor = await self.conn.cursor()
         date_time = datetime.now()
+        if user_id is not None:
+            # Ensure user exists (prevents FK violation on qr_keys.user_id -> users.user_id)
+            await cursor.execute(
+                "INSERT INTO Users (User_id, First_Name, Nick, Date_reg) VALUES (?, ?, ?, ?) ON CONFLICT (User_id) DO NOTHING",
+                (user_id, 'Имя не указано', f'user_{user_id}', date_time)
+            )
         try:
             await cursor.execute(
                 "INSERT INTO QR_Keys (User_id, VPN_Key, Date, OS, isAdminKey, ip_server, CountDaysBuy, Protocol, isChangeProtocol, Keys_Data, Podpiska, date_time, summ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
