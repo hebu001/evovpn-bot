@@ -233,6 +233,7 @@ xtr_pay_success_users = {}
 users_send_opros, users_send_close_repiod = {}, {}
 is_send_backup = False
 is_delete_keys_no_in_DB = False
+_user_key_operations = set()  # Защита от дублирования: хранит user_id с активной операцией создания/оплаты ключа
 
 TARIF_1 = 149
 TARIF_3 = 379
@@ -8903,6 +8904,11 @@ async def help_messages(message):
         await Print_Error()
 
 async def new_key(user_id, day=30, is_Admin=0, promo='', help_message=False, summ=0, bill_id='', protocol=PR_DEFAULT, date=None, ip_server=None, silent=False, isChangeLocation=False, RebillId='', Podpiska=-1, summ_tarif=-1):
+    # Защита от дублирования: если для этого user_id уже идёт создание ключа — выходим
+    if user_id in _user_key_operations:
+        logger.warning(f'⚠️ new_key: операция для {user_id} уже выполняется, пропускаем дубль')
+        return None
+    _user_key_operations.add(user_id)
     try:
         global NAME_VPN_CONFIG
         NAME_VPN_CONFIG = NAME_VPN_CONFIG.replace('_', '').replace('-', '').replace(' ', '')[:8]
@@ -9355,6 +9361,8 @@ async def new_key(user_id, day=30, is_Admin=0, promo='', help_message=False, sum
         await Print_Error()
         logger.warning(f'{user_id} - Произошла ошибка: {e}')
         return None
+    finally:
+        _user_key_operations.discard(user_id)
 
 
 async def plus_days_ref(user_id, id_ref, help_message=False):
@@ -12345,6 +12353,11 @@ async def handle_document(message):
 async def check_pay(bill_id, user, poz, isAdmin=False):
     try:
         user_id = user.id_Telegram
+
+        # Защита от дублирования: если для этого user_id уже идёт операция оплаты — выходим
+        if user_id in _user_key_operations:
+            logger.warning(f'⚠️ check_pay: операция для {user_id} уже выполняется, пропускаем дубль')
+            return None
 
         is_operations_exists = await DB.exists_opertion_by_bill_id(user_id, bill_id)
         if is_operations_exists:
