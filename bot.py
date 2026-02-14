@@ -5584,7 +5584,7 @@ class MARZBAN:
         
 
     async def delete_key(self, key):
-        """ОПТИМИЗИРОВАНО: Полностью асинхронная версия с aiohttp"""
+        """ОПТИМИЗИРОВАНО: Полностью асинхронная версия с aiohttp + retry"""
         try:
             url = f'{self.osn_url}/user/{key}'
             headers = await self._get_auth_headers()
@@ -5592,30 +5592,38 @@ class MARZBAN:
                 logger.warning(f'🛑delete_key: сервер {self.domain} недоступен, пропускаем ключ {key}')
                 return {"ok": False, "error": "server unavailable"}
             
-            async with aiohttp.ClientSession(timeout=get_timeount(10)) as session:
-                async with session.delete(url, headers=headers, ssl=False) as response:
-                    status_code = response.status
-                    
-                    # 204 — типичный успешный ответ на DELETE без тела
-                    if status_code == 204:
-                        logger.debug(f'Удалили ключ {key}: No Content (204)')
-                        return {"ok": True, "code": 204}
+            for attempt in range(2):
+                try:
+                    async with aiohttp.ClientSession(timeout=get_timeount(15)) as session:
+                        async with session.delete(url, headers=headers, ssl=False) as response:
+                            status_code = response.status
+                            
+                            # 204 — типичный успешный ответ на DELETE без тела
+                            if status_code == 204:
+                                logger.debug(f'Удалили ключ {key}: No Content (204)')
+                                return {"ok": True, "code": 204}
 
-                    # Если сервер вернул хоть какой-то текст — попытаемся распарсить
-                    body = await response.text()
-                    body = (body or '').strip()
-                    
-                    if not body:
-                        logger.debug(f'Удалили ключ {key}: HTTP {status_code}, пустое тело')
-                        return {"ok": 200 <= status_code < 300, "code": status_code}
+                            # Если сервер вернул хоть какой-то текст — попытаемся распарсить
+                            body = await response.text()
+                            body = (body or '').strip()
+                            
+                            if not body:
+                                logger.debug(f'Удалили ключ {key}: HTTP {status_code}, пустое тело')
+                                return {"ok": 200 <= status_code < 300, "code": status_code}
 
-                    try:
-                        data = await response.json()
-                        logger.debug(f'Удалили ключ {key}: {data}')
-                        return {"ok": 200 <= status_code < 300, "code": status_code, "data": data}
-                    except:
-                        logger.warning(f'Удалили ключ {key}, но ответ не JSON: {body[:200]}')
-                        return {"ok": 200 <= status_code < 300, "code": status_code, "text": body}
+                            try:
+                                data = await response.json()
+                                logger.debug(f'Удалили ключ {key}: {data}')
+                                return {"ok": 200 <= status_code < 300, "code": status_code, "data": data}
+                            except:
+                                logger.warning(f'Удалили ключ {key}, но ответ не JSON: {body[:200]}')
+                                return {"ok": 200 <= status_code < 300, "code": status_code, "text": body}
+                except (aiohttp.ServerTimeoutError, aiohttp.ClientConnectorError, asyncio.TimeoutError) as e:
+                    logger.warning(f'🛑delete_key: таймаут/ошибка для {key} на {self.domain} (попытка {attempt+1}/2): {e}')
+                    if attempt < 1:
+                        await asyncio.sleep(2)
+
+            return {"ok": False, "error": "timeout after 2 attempts"}
 
         except Exception as e:
             await Print_Error()
