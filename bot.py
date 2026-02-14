@@ -8153,8 +8153,8 @@ async def check_keys_all():
                                 await KEYS_ACTIONS.deleteKey(protocol, vpn_key, ip_server, date_key, CountDaysBuy, user_id)
                         return
 
-                    # Если осталось 1 день, то отправляем сообщение о том, что ключ отключен
-                    elif days_for_close_period < 1:
+                    # Если ключ истёк (0 дней и менее), отключаем
+                    elif days_for_close_period < 0:
                         
                         # Если ключ с реккурентной оплатой, пробуем списать сумму
                         if payment_id != '' and AUTO_PAY_YKASSA:
