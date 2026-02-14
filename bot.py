@@ -158,6 +158,9 @@ COUNT_DAYS_REF = _env_int("COUNT_DAYS_REF", 10)
 COUNT_DAYS_OTCHET = _env_int("COUNT_DAYS_OTCHET", 3)
 DAYS_PARTNER_URLS_DELETE = _env_int("DAYS_PARTNER_URLS_DELETE", 7)
 HOUR_CHECK = _env_int("HOUR_CHECK", 23)
+BATCH_SIZE_CHECK = _env_int("BATCH_SIZE_CHECK", 50)          # ключей за один чанк при ежедневной проверке
+BATCH_DELAY_CHECK = float(os.environ.get("BATCH_DELAY_CHECK", "0.3"))  # пауза между чанками (сек)
+BATCH_SEMAPHORE_CHECK = _env_int("BATCH_SEMAPHORE_CHECK", 15) # макс. одновременных задач в чанке
 
 PAY_CHANGE_PROTOCOL = _env_bool("PAY_CHANGE_PROTOCOL", False)
 PAY_CHANGE_LOCATIONS = _env_bool("PAY_CHANGE_LOCATIONS", False)
@@ -5025,12 +5028,11 @@ class MARZBAN:
                 return None
             url = f'{self.osn_url}/user/{key}'
             
-            async with get_domain_semaphore(self.domain):
-                async with aiohttp.ClientSession(timeout=get_timeount(10)) as session:
-                    async with session.get(url, headers=headers, ssl=False) as response:
-                        result = await response.json()
-                        logger.debug(f'Получили данные ключа {key}: {result}')
-                        return result
+            async with aiohttp.ClientSession(timeout=get_timeount(10)) as session:
+                async with session.get(url, headers=headers, ssl=False) as response:
+                    result = await response.json()
+                    logger.debug(f'Получили данные ключа {key}: {result}')
+                    return result
         except Exception as e:
             logger.warning(f'🛑_get_key_async ошибка для {key}: {e}')
             return None
@@ -8220,23 +8222,32 @@ async def check_keys_all():
                     _failed_keys.append(line)
 
         lines = await DB.get_qr_key_All()
-        tasks = []
-        # ОПТИМИЗИРОВАНО: Увеличен семафор с 5 до 30 (теперь aiohttp не блокирует event loop)
-        semaphore = asyncio.Semaphore(30)
-        for line in list(set(lines)):
-            tasks.append(asyncio.create_task(check_key(line, semaphore)))
-        # ИСПРАВЛЕНО: Добавлен await для ожидания завершения всех задач
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        unique_lines = list(set(lines))
+        
+        # Настройки из .env: BATCH_SIZE_CHECK, BATCH_DELAY_CHECK, BATCH_SEMAPHORE_CHECK
+        semaphore = asyncio.Semaphore(BATCH_SEMAPHORE_CHECK)
+        
+        logger.debug(f'🔄 Всего ключей для проверки: {len(unique_lines)}, чанки по {BATCH_SIZE_CHECK}, семафор {BATCH_SEMAPHORE_CHECK}, пауза {BATCH_DELAY_CHECK}с')
+        
+        for i in range(0, len(unique_lines), BATCH_SIZE_CHECK):
+            chunk = unique_lines[i:i+BATCH_SIZE_CHECK]
+            tasks = [asyncio.create_task(check_key(line, semaphore)) for line in chunk]
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            # Пауза между чанками — даём event loop обработать пользовательские запросы (30000 пользователей)
+            if i + BATCH_SIZE_CHECK < len(unique_lines):
+                await asyncio.sleep(BATCH_DELAY_CHECK)
         
         # Fix 7: Повторная попытка для упавших ключей
         if _failed_keys:
             logger.warning(f'🔄 Повторная проверка {len(_failed_keys)} ключей...')
-            retry_tasks = []
-            for line in _failed_keys:
-                retry_tasks.append(asyncio.create_task(check_key(line, semaphore)))
-            if retry_tasks:
-                await asyncio.gather(*retry_tasks, return_exceptions=True)
+            for i in range(0, len(_failed_keys), BATCH_SIZE_CHECK):
+                chunk = _failed_keys[i:i+BATCH_SIZE_CHECK]
+                retry_tasks = [asyncio.create_task(check_key(line, semaphore)) for line in chunk]
+                if retry_tasks:
+                    await asyncio.gather(*retry_tasks, return_exceptions=True)
+                if i + BATCH_SIZE_CHECK < len(_failed_keys):
+                    await asyncio.sleep(BATCH_DELAY_CHECK)
 
         logger.debug('✅Проверка на опрос и отключение ключей успешно завершена!')        
     except:
