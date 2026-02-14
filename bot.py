@@ -9735,7 +9735,7 @@ async def start_message(message):
 
         isUser = await DB.exists_user(user_id)
         if not isUser:
-            try: await DB.add_user(user_id, f'{user_mes.username}', f'{user_mes.first_name}', f'{user_mes.last_name}')
+            try: await DB.add_user(user_id, user_mes.username or '', user_mes.first_name or '', user_mes.last_name or '')
             except: pass
 
             # проверить если такой созданный промокод, если есть то попробовать установить его
@@ -10031,7 +10031,7 @@ async def help_message(message):
         isUser = await DB.exists_user(user_mes.id)
         if not isUser:
             try:
-                await DB.add_user(user_mes.id, f'{user_mes.username}', f'{user_mes.first_name}', f'{user_mes.last_name}')
+                await DB.add_user(user_mes.id, user_mes.username or '', user_mes.first_name or '', user_mes.last_name or '')
             except:
                 pass
         await help_messages(message)
@@ -14590,7 +14590,7 @@ async def keys_get_call(call=None, message=None, call_data=None):
             await delete_message(user_send, message.message_id)
             if not await check_promo_is_activ(user.code, user_id):
                 nick_user = message.chat.username
-                await DB.set_activate_promo(user.code, nick_user if not nick_user is None else user_id, user_id, user.days_code)
+                await DB.set_activate_promo(user.code, nick_user if not nick_user is None else str(user_id), user_id, user.days_code)
                 await DB.add_day_qr_key_in_DB(user_id, user.days_code, vpn_key)
                 await add_days(user_id, vpn_key, day=user.days_code, promo=user.code)
                 await DB.addReportsData('CountBuy', 1)
@@ -15965,7 +15965,7 @@ async def message_input(message, alt_text=''):
             isUser = await DB.exists_user(user_mes.id)
             if not isUser:
                 try:
-                    await DB.add_user(user_mes.id, f'{user_mes.username}', f'{user_mes.first_name}', f'{user_mes.last_name}')
+                    await DB.add_user(user_mes.id, user_mes.username or '', user_mes.first_name or '', user_mes.last_name or '')
                 except:
                     pass
             try:
@@ -17202,7 +17202,7 @@ async def message_input(message, alt_text=''):
             elif user.bot_status == 22:
                 if not (user.code in activated_promocodes and user_id == activated_promocodes[user.code]):
                     activated_promocodes[user.code] = user_id
-                    await DB.set_activate_promo(user.code, message.chat.username if not message.chat.username is None else user_id, user_id, user.days_code)
+                    await DB.set_activate_promo(user.code, message.chat.username if not message.chat.username is None else str(user_id), user_id, user.days_code)
                     await new_key(user_id, day=user.days_code, promo=user.code, help_message=True, protocol=user.Protocol)
                 else:
                     return await send_message(user_id, user.lang.get('tx_promo_is_activate'))
