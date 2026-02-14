@@ -8093,6 +8093,17 @@ async def check_keys_all():
 
                         # Перебрать все сервера и у всех выключить этот доступ
                         if not TEST:
+                            # Fix Race Condition: перечитываем ключ перед отключением
+                            _fresh = await DB.get_key_by_name(vpn_key)
+                            if _fresh:
+                                _fresh_date = _fresh[1]   # Date
+                                _fresh_active = _fresh[6]  # isActive
+                                if _fresh_date != date_key:
+                                    logger.debug(f'⚠️ Ключ {vpn_key} продлён во время проверки ({date_key} → {_fresh_date}), пропускаем отключение')
+                                    return
+                                if _fresh_active and not isActive:
+                                    logger.debug(f'⚠️ Ключ {vpn_key} активирован во время проверки, пропускаем отключение')
+                                    return
                             await KEYS_ACTIONS.deactivateKey(protocol, vpn_key, ip_server, date_key, CountDaysBuy, user_id)
                             if protocol in ('wireguard', 'vless', 'pptp'):
                                 logger.debug(f'❌Отключаем ключ: {vpn_key}')
@@ -8153,6 +8164,17 @@ async def check_keys_all():
 
                         # Перебрать все сервера и у всех выключить этот доступ
                         if not TEST:
+                            # Fix Race Condition: перечитываем ключ перед отключением
+                            _fresh = await DB.get_key_by_name(vpn_key)
+                            if _fresh:
+                                _fresh_date = _fresh[1]   # Date
+                                _fresh_active = _fresh[6]  # isActive
+                                if _fresh_date != date_key:
+                                    logger.debug(f'⚠️ Ключ {vpn_key} продлён во время проверки ({date_key} → {_fresh_date}), пропускаем отключение')
+                                    return
+                                if _fresh_active and not isActive:
+                                    logger.debug(f'⚠️ Ключ {vpn_key} активирован во время проверки, пропускаем отключение')
+                                    return
                             await KEYS_ACTIONS.deactivateKey(protocol, vpn_key, ip_server, date_key, CountDaysBuy, user_id)
                             if protocol in ('wireguard', 'vless', 'pptp'):
                                 logger.debug(f'❌Отключаем ключ: {vpn_key}')
