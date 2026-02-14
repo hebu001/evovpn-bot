@@ -5054,8 +5054,15 @@ class MARZBAN:
             data_key = response
         else:
             data_key = await self._get_key_async(key)
-        if data_key:
+        if data_key and 'subscription_url' in data_key:
             return data_key['subscription_url'] + f'?name={NAME_VPN_CONFIG}'
+        # Если subscription_url нет в ответе — пробуем получить данные ключа заново
+        if response and data_key:
+            logger.warning(f'⚠️ _get_link_async: subscription_url отсутствует в ответе для {key}, пробуем запросить заново')
+            data_key = await self._get_key_async(key)
+            if data_key and 'subscription_url' in data_key:
+                return data_key['subscription_url'] + f'?name={NAME_VPN_CONFIG}'
+        logger.warning(f'🛑_get_link_async: не удалось получить subscription_url для {key}')
         return None
 
     def _get_link(self, key, response=None):
@@ -5063,7 +5070,10 @@ class MARZBAN:
             data_key = response
         else:
             data_key = self._get_key(key)
-        return data_key['subscription_url'] + f'?name={NAME_VPN_CONFIG}'
+        if data_key and 'subscription_url' in data_key:
+            return data_key['subscription_url'] + f'?name={NAME_VPN_CONFIG}'
+        logger.warning(f'🛑_get_link: не удалось получить subscription_url для {key}')
+        return None
 
     async def install_marzban_for_server(self, user_id=None, location=''):
         try:
