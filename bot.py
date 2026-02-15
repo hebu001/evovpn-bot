@@ -4625,7 +4625,7 @@ _marzban_unavailable_servers = {}
 # Fix 10: per-domain семафоры для ограничения параллельных запросов к одному серверу
 _domain_semaphores = {}
 
-def get_domain_semaphore(domain: str, max_concurrent: int = 10) -> asyncio.Semaphore:
+def get_domain_semaphore(domain: str, max_concurrent: int = 20) -> asyncio.Semaphore:
     """Получить или создать семафор для конкретного домена Marzban.
     Ограничивает общее кол-во одновременных API-запросов к одному серверу.
     Используется в create_new_key, update_status_key, delete_key."""
