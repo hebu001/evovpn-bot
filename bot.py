@@ -4625,8 +4625,10 @@ _marzban_unavailable_servers = {}
 # Fix 10: per-domain семафоры для ограничения параллельных запросов к одному серверу
 _domain_semaphores = {}
 
-def get_domain_semaphore(domain: str, max_concurrent: int = 5) -> asyncio.Semaphore:
-    """Получить или создать семафор для конкретного домена Marzban"""
+def get_domain_semaphore(domain: str, max_concurrent: int = 10) -> asyncio.Semaphore:
+    """Получить или создать семафор для конкретного домена Marzban.
+    Ограничивает общее кол-во одновременных API-запросов к одному серверу.
+    Используется в create_new_key, update_status_key, delete_key."""
     if domain not in _domain_semaphores:
         _domain_semaphores[domain] = asyncio.Semaphore(max_concurrent)
     return _domain_semaphores[domain]
@@ -5379,6 +5381,7 @@ class MARZBAN:
                 logger.warning(f'🛑create_new_key: сервер {self.domain} недоступен')
                 return None
             
+            sem = get_domain_semaphore(self.domain)
             for attempt in range(3):
                 try:
                     # На последней попытке обновляем токен на случай если он протух
@@ -5388,23 +5391,24 @@ class MARZBAN:
                         if not headers:
                             break
 
-                    async with aiohttp.ClientSession(timeout=get_timeount(30)) as session:
-                        async with session.post(url, headers=headers, json=payload, ssl=False) as response:
-                            if response.status in (200, 201):
-                                result = await response.json()
-                                logger.debug(f'Создали новый ключ {key}: {result}')
-                                
-                                # Возвращаем ссылку на подписку
-                                if 'subscription_url' in result:
-                                    return result['subscription_url'] + f'?name={NAME_VPN_CONFIG}'
-                                return await self._get_link_async(key, response=result)
-                            elif response.status == 409:
-                                # Ключ уже существует — просто получаем ссылку
-                                logger.debug(f'create_new_key: ключ {key} уже существует, получаем ссылку')
-                                return await self._get_link_async(key)
-                            else:
-                                body = await response.text()
-                                logger.warning(f'🛑create_new_key: {self.domain} вернул {response.status}: {body[:200]}')
+                    async with sem:
+                        async with aiohttp.ClientSession(timeout=get_timeount(30)) as session:
+                            async with session.post(url, headers=headers, json=payload, ssl=False) as response:
+                                if response.status in (200, 201):
+                                    result = await response.json()
+                                    logger.debug(f'Создали новый ключ {key}: {result}')
+                                    
+                                    # Возвращаем ссылку на подписку
+                                    if 'subscription_url' in result:
+                                        return result['subscription_url'] + f'?name={NAME_VPN_CONFIG}'
+                                    return await self._get_link_async(key, response=result)
+                                elif response.status == 409:
+                                    # Ключ уже существует — просто получаем ссылку
+                                    logger.debug(f'create_new_key: ключ {key} уже существует, получаем ссылку')
+                                    return await self._get_link_async(key)
+                                else:
+                                    body = await response.text()
+                                    logger.warning(f'🛑create_new_key: {self.domain} вернул {response.status}: {body[:200]}')
                 except (aiohttp.ServerTimeoutError, aiohttp.ClientConnectorError, asyncio.TimeoutError) as e:
                     logger.warning(f'🛑create_new_key: таймаут для {key} на {self.domain} (попытка {attempt+1}/3): {e}')
                 
@@ -5459,15 +5463,17 @@ class MARZBAN:
                 logger.warning(f'🛑update_status_key: сервер {self.domain} недоступен, пропускаем ключ {key}')
                 return None
             
-            async with aiohttp.ClientSession(timeout=get_timeount(10)) as session:
-                async with session.put(url, headers=headers, json=payload, ssl=False) as response:
-                    if response.status not in (200, 201):
-                        body = await response.text()
-                        logger.warning(f'🛑update_status_key: {key} вернул {response.status}: {body[:200]}')
-                        return None
-                    result = await response.json()
-                    logger.debug(f'✅Изменили статус ключа {key}: {result}')
-                    return result
+            sem = get_domain_semaphore(self.domain)
+            async with sem:
+                async with aiohttp.ClientSession(timeout=get_timeount(15)) as session:
+                    async with session.put(url, headers=headers, json=payload, ssl=False) as response:
+                        if response.status not in (200, 201):
+                            body = await response.text()
+                            logger.warning(f'🛑update_status_key: {key} вернул {response.status}: {body[:200]}')
+                            return None
+                        result = await response.json()
+                        logger.debug(f'✅Изменили статус ключа {key}: {result}')
+                        return result
                     
         except Exception as e:
             logger.warning(f'🛑Ошибка в update_status_key (key={key}, status={status}): {e}')
@@ -5629,30 +5635,32 @@ class MARZBAN:
             
             for attempt in range(2):
                 try:
-                    async with aiohttp.ClientSession(timeout=get_timeount(15)) as session:
-                        async with session.delete(url, headers=headers, ssl=False) as response:
-                            status_code = response.status
-                            
-                            # 204 — типичный успешный ответ на DELETE без тела
-                            if status_code == 204:
-                                logger.debug(f'Удалили ключ {key}: No Content (204)')
-                                return {"ok": True, "code": 204}
+                    sem = get_domain_semaphore(self.domain)
+                    async with sem:
+                        async with aiohttp.ClientSession(timeout=get_timeount(15)) as session:
+                            async with session.delete(url, headers=headers, ssl=False) as response:
+                                status_code = response.status
+                                
+                                # 204 — типичный успешный ответ на DELETE без тела
+                                if status_code == 204:
+                                    logger.debug(f'Удалили ключ {key}: No Content (204)')
+                                    return {"ok": True, "code": 204}
 
-                            # Если сервер вернул хоть какой-то текст — попытаемся распарсить
-                            body = await response.text()
-                            body = (body or '').strip()
-                            
-                            if not body:
-                                logger.debug(f'Удалили ключ {key}: HTTP {status_code}, пустое тело')
-                                return {"ok": 200 <= status_code < 300, "code": status_code}
+                                # Если сервер вернул хоть какой-то текст — попытаемся распарсить
+                                body = await response.text()
+                                body = (body or '').strip()
+                                
+                                if not body:
+                                    logger.debug(f'Удалили ключ {key}: HTTP {status_code}, пустое тело')
+                                    return {"ok": 200 <= status_code < 300, "code": status_code}
 
-                            try:
-                                data = await response.json()
-                                logger.debug(f'Удалили ключ {key}: {data}')
-                                return {"ok": 200 <= status_code < 300, "code": status_code, "data": data}
-                            except:
-                                logger.warning(f'Удалили ключ {key}, но ответ не JSON: {body[:200]}')
-                                return {"ok": 200 <= status_code < 300, "code": status_code, "text": body}
+                                try:
+                                    data = await response.json()
+                                    logger.debug(f'Удалили ключ {key}: {data}')
+                                    return {"ok": 200 <= status_code < 300, "code": status_code, "data": data}
+                                except:
+                                    logger.warning(f'Удалили ключ {key}, но ответ не JSON: {body[:200]}')
+                                    return {"ok": 200 <= status_code < 300, "code": status_code, "text": body}
                 except (aiohttp.ServerTimeoutError, aiohttp.ClientConnectorError, asyncio.TimeoutError) as e:
                     logger.warning(f'🛑delete_key: таймаут/ошибка для {key} на {self.domain} (попытка {attempt+1}/2): {e}')
                     if attempt < 1:
