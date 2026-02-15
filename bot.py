@@ -5379,15 +5379,40 @@ class MARZBAN:
                 logger.warning(f'🛑create_new_key: сервер {self.domain} недоступен')
                 return None
             
-            async with aiohttp.ClientSession(timeout=get_timeount(15)) as session:
-                async with session.post(url, headers=headers, json=payload, ssl=False) as response:
-                    result = await response.json()
-                    logger.debug(f'Создали новый ключ {key}: {result}')
-                    
-                    # Возвращаем ссылку на подписку
-                    if 'subscription_url' in result:
-                        return result['subscription_url'] + f'?name={NAME_VPN_CONFIG}'
-                    return await self._get_link_async(key, response=result)
+            for attempt in range(3):
+                try:
+                    # На последней попытке обновляем токен на случай если он протух
+                    if attempt == 2:
+                        _marzban_token_cache.pop(self.domain, None)
+                        headers = await self._get_auth_headers()
+                        if not headers:
+                            break
+
+                    async with aiohttp.ClientSession(timeout=get_timeount(30)) as session:
+                        async with session.post(url, headers=headers, json=payload, ssl=False) as response:
+                            if response.status in (200, 201):
+                                result = await response.json()
+                                logger.debug(f'Создали новый ключ {key}: {result}')
+                                
+                                # Возвращаем ссылку на подписку
+                                if 'subscription_url' in result:
+                                    return result['subscription_url'] + f'?name={NAME_VPN_CONFIG}'
+                                return await self._get_link_async(key, response=result)
+                            elif response.status == 409:
+                                # Ключ уже существует — просто получаем ссылку
+                                logger.debug(f'create_new_key: ключ {key} уже существует, получаем ссылку')
+                                return await self._get_link_async(key)
+                            else:
+                                body = await response.text()
+                                logger.warning(f'🛑create_new_key: {self.domain} вернул {response.status}: {body[:200]}')
+                except (aiohttp.ServerTimeoutError, aiohttp.ClientConnectorError, asyncio.TimeoutError) as e:
+                    logger.warning(f'🛑create_new_key: таймаут для {key} на {self.domain} (попытка {attempt+1}/3): {e}')
+                
+                if attempt < 2:
+                    await asyncio.sleep(3 * (attempt + 1))  # 3с, 6с
+
+            logger.warning(f'🛑create_new_key: не удалось создать ключ {key} после 3 попыток')
+            return None
         except:
             await Print_Error()
 
