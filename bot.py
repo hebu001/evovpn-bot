@@ -8056,7 +8056,7 @@ async def check_keys_all():
             global users_send_opros, users_send_close_repiod
             # Ограничиваем нагрузку на конкретный сервер Marzban от batch check (лимит 10)
             ip_server_for_sem = line[5] if len(line) > 5 and line[5] else None
-            domain_sem = get_domain_semaphore(ip_server_for_sem, 10) if ip_server_for_sem else None
+            domain_sem = get_domain_semaphore(ip_server_for_sem, 5) if ip_server_for_sem else None
             async with semaphore:
                 # Ограничиваем нагрузку на конкретный сервер Marzban от batch check (лимит 10)
                 if domain_sem:
