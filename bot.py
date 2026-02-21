@@ -234,6 +234,7 @@ users_send_opros, users_send_close_repiod = {}, {}
 is_send_backup = False
 is_delete_keys_no_in_DB = False
 _user_key_operations = set()  # Защита от дублирования: хранит user_id с активной операцией создания/оплаты ключа
+_user_location_change = set()  # Защита от двойного нажатия при смене локации
 
 TARIF_1 = 149
 TARIF_3 = 379
@@ -14600,11 +14601,11 @@ async def keys_get_call(call=None, message=None, call_data=None):
                     logger.debug(f'{user_id} - Новый ip сервера {ip_server}')
                     if ip_server:
                         # Защита от двойного нажатия
-                        if user_id in _user_key_operations:
+                        if user_id in _user_location_change:
                             if call:
                                 await bot.answer_callback_query(callback_query_id=call.id, text='⏳ Операция уже выполняется', show_alert=True)
                             return
-                        _user_key_operations.add(user_id)
+                        _user_location_change.add(user_id)
                         try:
                             # удалить ключ на сервере и в БД
                             protocol = None
@@ -14642,7 +14643,7 @@ async def keys_get_call(call=None, message=None, call_data=None):
                                 await send_message(user_send, user.lang.get('tx_no_find_key').format(key=vpn_key))
                                 logger.warning(f'{user_id} - Не найден ключ 1')
                         finally:
-                            _user_key_operations.discard(user_id)
+                            _user_location_change.discard(user_id)
                     else:
                         await send_message(user_send, user.lang.get('tx_no_find_key').format(key=vpn_key))
                         logger.debug(f'{user_id} - Не найден ключ {vpn_key}')
