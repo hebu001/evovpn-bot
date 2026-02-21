@@ -4816,7 +4816,7 @@ class KEYS_ACTIONS:
         logger.debug(f'Отключили ключ {conf_name}')
         return True
 
-    async def deleteKey(protocol, conf_name, ip_server=None, date=None, CountDaysBuy=None, user_id=None):
+    async def deleteKey(protocol, conf_name, ip_server=None, date=None, CountDaysBuy=None, user_id=None, max_retries=5):
         """
         Удаление ключа
         
@@ -4859,7 +4859,7 @@ class KEYS_ACTIONS:
                             break
                         count_delete += 1
                         await sleep(random.randint(5,20)/10)
-                        if count_delete > 5:
+                        if count_delete > max_retries:
                             dop_info = (
                                 f'IP сервера: <b>{server["ip"]}</b>\n'
                                 f'Ключ: <b>{conf_name}</b>\n'
@@ -10398,6 +10398,12 @@ async def history_message(message):
 
 async def transfer_keys(message, all_keys_data, select_servers, one=False):
     try:
+        # Проверяем доступность старого сервера ОДИН РАЗ до цикла
+        old_server_ip = select_servers[0]
+        old_server_available = await check_server_is_work(old_server_ip, time_check=3)
+        if not old_server_available:
+            logger.warning(f'⚠️ transfer_keys: Старый сервер {old_server_ip} недоступен, удаление только из БД')
+
         async def delete_key(user_id, vpn_key):
             try:
                 date = None
@@ -10412,10 +10418,13 @@ async def transfer_keys(message, all_keys_data, select_servers, one=False):
                     CountDaysBuy = line[4]
 
                     if vpn_key == vpn_key1:
-                        await KEYS_ACTIONS.deleteKey(protocol, vpn_key, ip_server, date, CountDaysBuy, user_id)
+                        # Удаляем на сервере только если он доступен
+                        if old_server_available:
+                            await KEYS_ACTIONS.deleteKey(protocol, vpn_key, ip_server, date, CountDaysBuy, user_id, max_retries=1)
+                        else:
+                            # Сервер недоступен — только удаляем из БД
+                            await DB.delete_qr_key(vpn_key)
                         break
-                
-                await DB.delete_qr_key(vpn_key)
 
                 if not IS_OTCHET:
                     await send_admins(user_id, 'Перенос (🔑 удален)', f'<b>{vpn_key}</b> ({date}, {CountDaysBuy} {await dney(CountDaysBuy)}, {ip_server}, {protocol})')
@@ -10431,6 +10440,8 @@ async def transfer_keys(message, all_keys_data, select_servers, one=False):
             f'⏳Время начала: {time_start}\n\n'
             '🔄Перенос ключей на другие сервера\n'
         )
+        if not old_server_available:
+            send_text += f'⚠️ Сервер {old_server_ip} недоступен, удаление ключей только из БД\n'
         mes_del = await send_message(message.chat.id, send_text)
 
         for index, key in enumerate(all_keys_data):
@@ -14588,35 +14599,50 @@ async def keys_get_call(call=None, message=None, call_data=None):
                     
                     logger.debug(f'{user_id} - Новый ip сервера {ip_server}')
                     if ip_server:
-                        # удалить ключ на сервере и в БД
-                        protocol = None
-                        CountDaysBuy = None
-                        date = None
+                        # Защита от двойного нажатия
+                        if user_id in _user_key_operations:
+                            if call:
+                                await bot.answer_callback_query(callback_query_id=call.id, text='⏳ Операция уже выполняется', show_alert=True)
+                            return
+                        _user_key_operations.add(user_id)
+                        try:
+                            # удалить ключ на сервере и в БД
+                            protocol = None
+                            CountDaysBuy = None
+                            date = None
 
-                        mes_del_ = await send_message(user_id, user.lang.get('tx_change_location_wait'))
+                            mes_del_ = await send_message(user_id, user.lang.get('tx_change_location_wait'))
 
-                        lines = await DB.get_qr_key_All(user_id)
-                        for line in lines:
-                            ip_server_ = line[5]
-                            vpn_key1 = line[0]
-                            protocol = line[7]
-                            date = line[1]
-                            CountDaysBuy = line[4]
-                            Podpiska = line[12]
-                            summ_tarif = line[14]
+                            lines = await DB.get_qr_key_All(user_id)
+                            for line in lines:
+                                ip_server_ = line[5]
+                                vpn_key1 = line[0]
+                                protocol = line[7]
+                                date = line[1]
+                                CountDaysBuy = line[4]
+                                Podpiska = line[12]
+                                summ_tarif = line[14]
 
-                            if vpn_key == vpn_key1:
-                                await KEYS_ACTIONS.deleteKey(protocol, vpn_key, ip_server_, date, CountDaysBuy, user_id)
-                                break
-                        
-                        if ip_server and protocol and CountDaysBuy and date:
-                            await DB.delete_qr_key(vpn_key)
-                            await delete_message(user_id, mes_del_.message_id)
-                            await new_key(user_id, day=CountDaysBuy, help_message=True, protocol=protocol, date=date, ip_server=ip_server, isChangeLocation=True, Podpiska=Podpiska, summ_tarif=summ_tarif)
-                        else:
-                            await delete_message(user_id, mes_del_.message_id)
-                            await send_message(user_send, user.lang.get('tx_no_find_key').format(key=vpn_key))
-                            logger.warning(f'{user_id} - Не найден ключ 1')
+                                if vpn_key == vpn_key1:
+                                    # Быстрая проверка: если старый сервер недоступен — пропускаем удаление на нём (2с вместо 70с)
+                                    old_server_ok = await check_server_is_work(ip_server_, time_check=2)
+                                    if old_server_ok:
+                                        await KEYS_ACTIONS.deleteKey(protocol, vpn_key, ip_server_, date, CountDaysBuy, user_id, max_retries=1)
+                                    else:
+                                        logger.warning(f'{user_id} - Старый сервер {ip_server_} недоступен, пропускаем удаление ключа на сервере')
+                                    break
+                            
+                            if ip_server and protocol and CountDaysBuy and date:
+                                # deleteKey уже удаляет из БД при успехе; если сервер был недоступен — удаляем вручную
+                                await DB.delete_qr_key(vpn_key)
+                                await delete_message(user_id, mes_del_.message_id)
+                                await new_key(user_id, day=CountDaysBuy, help_message=True, protocol=protocol, date=date, ip_server=ip_server, isChangeLocation=True, Podpiska=Podpiska, summ_tarif=summ_tarif)
+                            else:
+                                await delete_message(user_id, mes_del_.message_id)
+                                await send_message(user_send, user.lang.get('tx_no_find_key').format(key=vpn_key))
+                                logger.warning(f'{user_id} - Не найден ключ 1')
+                        finally:
+                            _user_key_operations.discard(user_id)
                     else:
                         await send_message(user_send, user.lang.get('tx_no_find_key').format(key=vpn_key))
                         logger.debug(f'{user_id} - Не найден ключ {vpn_key}')
