@@ -3612,14 +3612,22 @@ class YPay:
                     url = 'https://cardlink.link/api/v1/merchant/balance'
                     async with aiohttp.ClientSession(timeout=get_timeount(5)) as session:
                         async with session.get(url, headers=self.headers) as response:
+                            if response.status != 200:
+                                body = await response.text()
+                                logger.warning(f'CardLink balance API error {response.status}: {body[:200]}')
+                                return 0
                             res = await response.json()
-                            balances = res['balances']
-                            res = balances[0]
-                            b_1 = float(res['balance_available'])
-                            b_2 = float(res['balance_hold'])
+                            balances = res.get('balances', [])
+                            if not balances:
+                                logger.warning('CardLink: пустой массив balances')
+                                return 0
+                            res_bal = balances[0]
+                            b_1 = float(res_bal.get('balance_available', 0))
+                            b_2 = float(res_bal.get('balance_hold', 0))
                             balance = int(b_1 + b_2)
                     
                 except Exception as error:
+                    logger.warning(f'CardLink get_balance error: {type(error).__name__}: {error}')
                     await self.__error__(error)
                     return 0
                 return balance
@@ -3770,6 +3778,7 @@ class YPay:
                         logger.debug(f'Ссылка для оплаты = {response_data["data"]["url"]}')
                         return response_data["data"]["url"]
             elif self.isCardLink:
+                user.summ_pay = summ
                 url = 'https://cardlink.link/api/v1/bill/create'
                 data = {
                     'amount': summ,
@@ -3781,15 +3790,31 @@ class YPay:
                     'name': user.lang.get('tx_pay_data').format(user_id=user.id_Telegram),
                 }
 
-                async with aiohttp.ClientSession(timeout=get_timeount(5)) as session:
-                    async with session.post(url, data=data, headers=self.headers) as response:
-                        res = await response.json()
-                        logger.debug(f'Ссылка для оплаты = {res}')
-                        
-                        url = res['link_page_url']
-                        user.bill_id = res['bill_id']
-                        
-                        return url
+                for attempt in range(2):
+                    try:
+                        async with aiohttp.ClientSession(timeout=get_timeount(15)) as session:
+                            async with session.post(url, data=data, headers=self.headers) as response:
+                                if response.status not in (200, 201):
+                                    body = await response.text()
+                                    logger.warning(f'CardLink create pay API error {response.status}: {body[:200]}')
+                                    if attempt == 0:
+                                        await asyncio.sleep(2)
+                                        continue
+                                    return ''
+                                res = await response.json()
+                                logger.debug(f'Ссылка для оплаты = {res}')
+                                
+                                url_req = res.get('link_page_url', '')
+                                user.bill_id = res.get('bill_id', '')
+                                
+                                return url_req
+                    except Exception as error:
+                        logger.warning(f'CardLink create_pay error: {type(error).__name__}: {error}')
+                        if attempt == 0:
+                            await asyncio.sleep(2)
+                            continue
+                        return ''
+                return ''
             elif self.isCryptomus:
                 user.bill_id = str(random.randint(100000, 999999))
                 result = await self.cryptomus.payments.create_invoice(
@@ -4014,17 +4039,22 @@ class YPay:
                 logger.debug(f'Проверяю bill_id CardLink === {bill_id}')
                 url = f'https://cardlink.link/api/v1/bill/status?id={bill_id}'
                 
-                async with aiohttp.ClientSession(timeout=get_timeount(5)) as session:
+                async with aiohttp.ClientSession(timeout=get_timeount(10)) as session:
                     async with session.get(url, headers=self.headers) as response:
+                        if response.status != 200:
+                            body = await response.text()
+                            logger.warning(f'CardLink status API error {response.status}: {body[:200]}')
+                            return (False, 0, '')
+
                         res = await response.json()
                         logger.debug(f'CardLink bill_id = {bill_id}: {res}')
                         
-                        if res["status"] == "SUCCESS":
-                            return (True, int(float(res["amount"])), '')
+                        if res.get("status") == "SUCCESS":
+                            return (True, int(float(res.get("amount", 0))), '')
                         else:
                             return (False, 0, '')
             except Exception as e:
-                logger.warning('Оплата не прошла')
+                logger.warning(f'CardLink check_is_pay error: {type(e).__name__}: {e}')
                 return (False, 0, '')
         elif self.isYooMoney:
             try:
@@ -4370,9 +4400,14 @@ class YPay:
                 
                 async with aiohttp.ClientSession(timeout=get_timeount(5)) as session:
                     async with session.get(url, headers=self.headers) as response:
+                        if response.status != 200:
+                            body = await response.text()
+                            logger.warning(f'CardLink search API error {response.status}: {body[:200]}')
+                            return False
                         res = await response.json()
-                        operations = res['data']
+                        operations = res.get('data', [])
             except Exception as error:
+                logger.warning(f'CardLink get_operations error: {type(error).__name__}: {error}')
                 await self.__error__(error)
                 return False
 
@@ -12467,6 +12502,12 @@ async def check_pay(bill_id, user, poz, isAdmin=False):
                 return False
 
         if is_paid:
+            if not isAdmin and getattr(user, 'summ_pay', None):
+                if summ < user.summ_pay:
+                    logger.warning(f'⚠️ Недоплата {user_id}: оплатил {summ}, ожидалось {user.summ_pay}')
+                    await send_admins(user_id, '⚠️Недоплата (фрод?)', f'Пользователь оплатил <b>{summ}₽</b>, ожидалось <b>{user.summ_pay}₽</b>.\n\nПлатёжная система: <code>{user.PAY_WALLET.Name}</code>\nСчёт: <code>{bill_id}</code>')
+                    return None
+
             user.isAutoCheckOn = False
             user.paymentDescription = desc
             user.bill_id = ''
@@ -12653,7 +12694,7 @@ async def auto_check_pay(user_id, poz, bill_id):
             if result:
                 return
             else:
-                await sleep(5)
+                await asyncio.sleep(15)
     except:
         await Print_Error()
 
@@ -13762,7 +13803,10 @@ async def zaprosi_call(call, no_done=False, menu=False):
             call.data = call.data.split('::')[0]
             await zaprosi_call(call, no_done=True)
             # отправить админу сообщение о том, что запрос одобрен или отклонен
-            await bot.answer_callback_query(callback_query_id=call.id, show_alert=True, text=f"✅Запрос с №{id_zapros} и суммой успешно {'одобрен' if is_podtv_yes else 'отклонен'}!")
+            try:
+                await bot.answer_callback_query(callback_query_id=call.id, show_alert=True, text=f"✅Запрос с №{id_zapros} и суммой успешно {'одобрен' if is_podtv_yes else 'отклонен'}!")
+            except Exception:
+                pass  # callback query устарел (>30с), неважно
             podtv = False
             no_done = True
 
@@ -17034,6 +17078,20 @@ async def message_input(message, alt_text=''):
             shop_id = message.text.strip()
 
             if len(shop_id) >= 8:
+                try:
+                    url = 'https://cardlink.link/api/v1/merchant/balance'
+                    headers = {'Authorization': f'Bearer {user.yookassa_api_key}'}
+                    async with aiohttp.ClientSession(timeout=get_timeount(10)) as session:
+                        async with session.get(url, headers=headers) as response:
+                            if response.status != 200:
+                                await send_message(message.chat.id, f'🛑Ошибка проверки API ключа. Ответ сервера: {response.status}. Проверьте данные и попробуйте снова (/wallets)')
+                                user.bot_status = 0
+                                return
+                except Exception as e:
+                    await send_message(message.chat.id, f'🛑Ошибка соединения при проверке ключа. Попробуйте снова (/wallets)')
+                    user.bot_status = 0
+                    return
+
                 await DB.ADD_WALLET(PAY_METHODS.CARDLINK, user.yookassa_api_key, shop_id, '')
                 user.yookassa_api_key = ''
                 user.yookassa_shopId = ''
